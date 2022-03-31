@@ -1,7 +1,10 @@
+import csv
+
+
 configfile: "../config/main.yml"
 
 
-META_FILES = (
+FILES_META = [
     "20140625_related_individuals.txt",
     "README_chrMT_phase3_callmom.md",
     "README_known_issues_20200731",
@@ -11,19 +14,184 @@ META_FILES = (
     "integrated_call_male_samples_v3.20130502.ALL.panel",
     "integrated_call_samples_v3.20130502.ALL.panel",
     "integrated_call_samples_v3.20200731.ALL.ped",
-)
+]
+
+FILES_AUTOSOMES = [
+    "ALL.chr1.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr10.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr11.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr12.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr13.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr14.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr15.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr16.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr17.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr18.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr19.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr2.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr20.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr21.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr3.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr4.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr5.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr6.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr7.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr8.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+    "ALL.chr9.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz",
+]
+
+FILES_CHRMT = [
+    "ALL.chrMT.phase3_callmom-v0_4.20130502.genotypes.vcf.gz",
+]
+
+FILES_CHRX = [
+    "ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.20130502.genotypes.vcf.gz"
+]
+
+FILES_CHRY = ["ALL.chrY.phase3_integrated_v2b.20130502.genotypes.vcf.gz"]
+
+
+def load_sheet():
+    """Load the sample sheet from the PED files
+    
+    Restrict to those in the VCF file for chr1.
+
+    Generate the samples-in-vcf.txt file with
+
+    ::
+    
+        bcftools view -h igsr-data/ALL.chr1.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz \
+        | grep CHROM | cut -f 10- | tr '\t' '\n' \
+        > igsr-metadata/samples-in-vcf.txt
+    """
+    in_vcf = []
+    with open("igsr-metadata/samples-in-vcf.txt", "rt") as inputf:
+        for row in inputf:
+            in_vcf.append(row.strip())
+    in_vcf = set(in_vcf)
+
+    header = None
+    with open(
+        "igsr-metadata/integrated_call_samples_v3.20200731.ALL.ped", "rt"
+    ) as inputf:
+        reader = csv.reader(inputf, delimiter="\t")
+        for row in reader:
+            if not header:
+                header = row
+            else:
+                vals = dict(zip(header, row))
+                if vals[COL_INDIVIDUAL] in in_vcf:
+                    yield vals
+
+
+RELATIONSHIP_CHILD = "child"
+RELATIONSHIP_UNRELATED = "unrel"
+
+COL_RELATIONSHIP = "Relationship"
+COL_INDIVIDUAL = "Individual ID"
+COL_GENDER = "Gender"
+
+SEX_MALE = "1"
+SEX_FEMALE = "2"
+
+
+#: All samples
+SHEET_FULL = list(load_sheet())
+#: Only children or unrelated samples
+SHEET_INDEX = {
+    row[COL_INDIVIDUAL]: row
+    for row in SHEET_FULL
+    if row[COL_RELATIONSHIP] in (RELATIONSHIP_UNRELATED, RELATIONSHIP_CHILD)
+}
+# #: Only male indices
+# SHEET_MALE = {row[COL_INDIVIDUAL]: row for row in SHEET_INDEX if row[COL_GENDER] == SEX_MALE]
+# #: Only female indices
+# SHEET_FEMALE = {row[COL_INDIVIDUAL]: row for row in SHEET_INDEX if row[COL_GENDER] == SEX_FEMALE]
+
 
 rule default:
-    input: []
+    input:
+        "igsr-data/.done",
+        expand("igsr-data-per-chrom/{sample}/.done", sample=SHEET_INDEX.keys()),
+
+
+# Collect all VCF files.
+rule download_all_vcf_files:
+    input:
+        expand(
+            "igsr-data/{filename}.md5",
+            filename=FILES_AUTOSOMES + FILES_CHRMT + FILES_CHRX + FILES_CHRY,
+        ),
+    output:
+        touch("igsr-data/.done"),
+
+
+def input_get_data_per_chrom(wildcards):
+    """Get input files for rule ``get_data_per_chrom``."""
+    sample = SHEET_INDEX[wildcards.sample]
+    result = FILES_AUTOSOMES + FILES_CHRMT + FILES_CHRX
+    if sample[COL_GENDER] == "SEX_MALE":
+        result += FILES_CHRY
+    return [f"igsr-data/{x}" for x in result]
+
+
+# Split out chromosomes
+rule get_data_per_chrom:
+    input:
+        input_get_data_per_chrom,
+    output:
+        "igsr-data-per-chrom/{sample}/.done",
+    shell:
+        r"""
+        set -x
+        outdir=$(dirname {output})
+
+        for f in {input}; do
+            chrom=$(basename $f | cut -d . -f 2)
+            out=$outdir/$chrom.vcf.gz
+            bcftools view \
+                -s {wildcards.sample} \
+                -O z \
+                -o $out \
+                $f
+            tabix -f $out
+        done
+        """
+
+
+# Download the VCF files.
+rule download_one_vcf_file:
+    output:
+        vcf="igsr-data/{filename}",
+        vcf_md5="igsr-data/{filename}.md5",
+        tbi="igsr-data/{filename}.tbi",
+        tbi_md5="igsr-data/{filename}.tbi.md5",
+    params:
+        base_url=config["igsr"]["base_url"],
+    shell:
+        r"""
+        wget -O {output.vcf}.tmp {params.base_url}/$(basename {output.vcf})
+        mv {output.vcf}.tmp {output.vcf}
+        wget -O {output.tbi}.tmp {params.base_url}/$(basename {output.tbi})
+        mv {output.tbi}.tmp {output.tbi}
+
+        pushd igsr-data
+        md5sum {wildcards.filename} >{wildcards.filename}.md5.tmp
+        md5sum {wildcards.filename}.tbi >{wildcards.filename}.tbi.md5.tmp
+        mv {wildcards.filename}.md5.tmp {wildcards.filename}.md5
+        mv {wildcards.filename}.tbi.md5.tmp {wildcards.filename}.tbi.md5
+        """
+
 
 # Download meta data files from IGSR web server.  These files are actually
 # added to the Git repository.
 rule download_metadata:
     output:
         done=touch("igsr-metadata/.done"),
-        files=expand("igsr-metadata/{file}", file=META_FILES)
+        files=expand("igsr-metadata/{file}", file=FILES_META),
     params:
-        base_url=config["igsr"]["base_url"]
+        base_url=config["igsr"]["base_url"],
     shell:
         r"""
         set -x
