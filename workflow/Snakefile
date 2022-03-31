@@ -1,0 +1,34 @@
+configfile: "../config/main.yml"
+
+
+META_FILES = (
+    "20140625_related_individuals.txt",
+    "README_chrMT_phase3_callmom.md",
+    "README_known_issues_20200731",
+    "README_phase3_callset_20150220",
+    "README_phase3_chrY_calls_20141104",
+    "README_vcf_info_annotation.20141104",
+    "integrated_call_male_samples_v3.20130502.ALL.panel",
+    "integrated_call_samples_v3.20130502.ALL.panel",
+    "integrated_call_samples_v3.20200731.ALL.ped",
+)
+
+rule default:
+    input: []
+
+# Download meta data files from IGSR web server.  These files are actually
+# added to the Git repository.
+rule download_metadata:
+    output:
+        done=touch("igsr-metadata/.done"),
+        files=expand("igsr-metadata/{file}", file=META_FILES)
+    params:
+        base_url=config["igsr"]["base_url"]
+    shell:
+        r"""
+        set -x
+        for f in {output.files}; do
+            wget -O $f.tmp {params.base_url}/$(basename $f)
+            mv $f.tmp $f
+        done
+        """
